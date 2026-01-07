@@ -1,6 +1,6 @@
 'use client'
 
-import { getCounterProgram, getCounterProgramId } from '@project/anchor'
+import { getCounterProgram, getCounterProgramId } from 'anchor1/src'
 import { useConnection } from '@solana/wallet-adapter-react'
 import { Cluster, Keypair, PublicKey } from '@solana/web3.js'
 import { useMutation, useQuery } from '@tanstack/react-query'
