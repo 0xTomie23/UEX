@@ -1,6 +1,7 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{
     transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked,
+    mint_to, MintTo,
 };
 
 // 1. 普通转账函数 (用户 -> Vault)
@@ -53,4 +54,27 @@ pub fn transfer_tokens_with_signer<'info>(
     );
 
     transfer_checked(cpi_context, *amount, mint.decimals)
+}
+
+pub fn mint_tokens<'info>(
+    mint: &InterfaceAccount<'info, Mint>,
+    to: &InterfaceAccount<'info, TokenAccount>,
+    amount: &u64,
+    authority: &AccountInfo<'info>,
+    token_program: &Interface<'info, TokenInterface>,
+    signer_seeds: &[&[&[u8]]],
+) -> Result<()> {
+    let cpi_accounts = MintTo {
+        mint: mint.to_account_info(),
+        to: to.to_account_info(),
+        authority: authority.to_account_info(),
+    };
+
+    let cpi_context = CpiContext::new_with_signer(
+        token_program.to_account_info(),
+        cpi_accounts,
+        signer_seeds,
+    );
+
+    mint_to(cpi_context, *amount)
 }
