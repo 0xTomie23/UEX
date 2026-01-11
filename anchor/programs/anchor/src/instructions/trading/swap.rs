@@ -1,4 +1,10 @@
+use crate::constants::ANCHOR_DISCRIMINATOR;
+use crate::constants::POOL_SEED;
+use crate::instructions::shared::*;
+use crate::state::LiquidityPool;
 use anchor_lang::prelude::*;
+use anchor_spl::associated_token::AssociatedToken;
+use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 
 #[derive(Accounts)]
 pub struct Swap<'info> {
@@ -15,42 +21,68 @@ pub struct Swap<'info> {
     pub associated_token_program: Program<'info, AssociatedToken>,
 }
 
+pub fn swap(
+    ctx: Context<Swap>,
+    amount_in: u64,
+    amount_out_min: u64,
+    is_x_to_y: bool,
+) -> Result<()> {
+    let accounts = &ctx.accounts;
 
-pub fn swap(ctx: Context<Swap>, amount_in:u64, amount_out_min:u64, is_x_to_y:bool) -> Result<()> {
     //自动判断输入输出方向
-    let (mint_in, mint_out,
-    vault_in, vault_out,
-    user_in, user_out) = if is_x_to_y {
-        (user_x_mint, user_y_mint, x_vault, y_vault, user_token_account_x, user_token_account_y)
+    let (mint_in, mint_out, vault_in, vault_out, user_in, user_out) = if is_x_to_y {
+        (
+            &accounts.user_x_mint,
+            &accounts.user_y_mint,
+            &accounts.x_vault,
+            &accounts.y_vault,
+            &accounts.user_token_account_x,
+            &accounts.user_token_account_y,
+        )
     } else {
-        (user_y_mint, user_x_mint, y_vault, x_vault, user_token_account_y, user_token_account_x)
+        (
+            &accounts.user_y_mint,
+            &accounts.user_x_mint,
+            &accounts.y_vault,
+            &accounts.x_vault,
+            &accounts.user_token_account_y,
+            &accounts.user_token_account_x,
+        )
     };
+
+    // 这里需要根据常数乘积公式计算 amount_out
+    // 暂时先设置为 amount_in 以便编译通过，实际业务需要实现计算逻辑
+    let amount_out = amount_in;
 
     //转账输入代币到vault
     transfer_tokens(
         user_in,
         vault_in,
-        amount_in,
+        &amount_in,
         mint_in,
-        &ctx.accounts.payer,
-        &ctx.accounts.token_program,
-    )
+        &accounts.payer,
+        &accounts.token_program,
+    )?;
+
     //vault转账输出代币到用户
+    let mint_x_key = accounts.user_x_mint.key();
+    let mint_y_key = accounts.user_y_mint.key();
     let seeds = &[
-                POOL_SEED.as_bytes(),
-                ctx.accounts.user_mint_x.key().as_ref(), // 永远放 X
-                ctx.accounts.user_mint_y.key().as_ref(), // 永远放 Y
-                &[ctx.accounts.pool.bump],
-                ];
-    transfer_token_with_signer(
+        POOL_SEED.as_bytes(),
+        mint_x_key.as_ref(), // 永远放 X
+        mint_y_key.as_ref(), // 永远放 Y
+        &[accounts.pool.bump],
+    ];
+    let signer_seeds = &[&seeds[..]];
+
+    transfer_tokens_with_signer(
         vault_out,
         user_out,
-        amount_out,
+        &amount_out,
         mint_out,
-        &ctx.accounts.pool.to_account_info(),
-        &ctx.accounts.token_program,
-        signer = &[&seeds[..]],
-
-    )
+        &accounts.pool.to_account_info(),
+        &accounts.token_program,
+        signer_seeds,
+    )?;
     Ok(())
 }

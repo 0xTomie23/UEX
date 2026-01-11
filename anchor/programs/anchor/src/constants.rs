@@ -1,7 +1,6 @@
 use anchor_lang::prelude::*;
 
-#[constant]
-pub const ANCHOR_DISCRIMINATOR: u8 = 8;
+pub const ANCHOR_DISCRIMINATOR: usize = 8;
 #[constant]
 pub const POOL_SEED: &str = "pool";
 #[constant]
