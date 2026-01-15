@@ -535,3 +535,113 @@ export function useUserTokens() {
   });
 }
 
+// Metaplex Token Metadata Program ID
+export const TOKEN_METADATA_PROGRAM_ID = new PublicKey(
+  "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
+);
+
+// 推导 Mint PDA（基于 creator）
+export function getMintPda(creator: PublicKey): PublicKey {
+  const [pda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("mint"), creator.toBuffer()],
+    PROGRAM_ID
+  );
+  return pda;
+}
+
+// 推导 BondingCurve PDA
+export function getBondingCurvePda(mint: PublicKey): PublicKey {
+  const [pda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("bonding_curve"), mint.toBuffer()],
+    PROGRAM_ID
+  );
+  return pda;
+}
+
+// 推导 Metadata PDA
+export function getMetadataPda(mint: PublicKey): PublicKey {
+  const [pda] = PublicKey.findProgramAddressSync(
+    [
+      Buffer.from("metadata"),
+      TOKEN_METADATA_PROGRAM_ID.toBuffer(),
+      mint.toBuffer(),
+    ],
+    TOKEN_METADATA_PROGRAM_ID
+  );
+  return pda;
+}
+
+// Create Token (Meme 币创建，带 Metadata)
+export function useCreateToken() {
+  const program = useDexProgram();
+  const { publicKey } = useWallet();
+  const queryClient = useQueryClient();
+  const transactionToast = useTransactionToast();
+
+  return useMutation({
+    mutationFn: async ({
+      name,
+      symbol,
+      uri,
+    }: {
+      name: string;
+      symbol: string;
+      uri: string;
+    }) => {
+      if (!program || !publicKey) throw new Error("Wallet not connected");
+
+      // 推导所有 PDA
+      const mintPda = getMintPda(publicKey);
+      const bondingCurvePda = getBondingCurvePda(mintPda);
+      const metadataPda = getMetadataPda(mintPda);
+      
+      // 获取 mint_vault (bonding_curve 的 ATA)
+      const mintVault = await getAssociatedTokenAddress(
+        mintPda, 
+        bondingCurvePda, 
+        true // allowOwnerOffCurve
+      );
+
+      console.log("Creating token with metadata:");
+      console.log("  Name:", name);
+      console.log("  Symbol:", symbol);
+      console.log("  URI:", uri);
+      console.log("  Mint PDA:", mintPda.toString());
+      console.log("  BondingCurve PDA:", bondingCurvePda.toString());
+      console.log("  Metadata PDA:", metadataPda.toString());
+
+      const signature = await program.methods
+        .createToken(name, symbol, uri)
+        .accounts({
+          creator: publicKey,
+          mint: mintPda,
+          metadata: metadataPda,
+          mintVault: mintVault,
+          bondingCurve: bondingCurvePda,
+          systemProgram: SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          tokenMetadataProgram: TOKEN_METADATA_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          rent: anchor.web3.SYSVAR_RENT_PUBKEY,
+        })
+        .rpc();
+
+      console.log("Token created, signature:", signature);
+      
+      // 保存代币名称到本地存储
+      saveTokenName(mintPda.toString(), name);
+      
+      return { signature, mintAddress: mintPda.toString() };
+    },
+    onSuccess: (result) => {
+      transactionToast(result.signature);
+      queryClient.invalidateQueries({ queryKey: ["userTokens"] });
+    },
+    onError: (error: any) => {
+      console.error("Create token error:", error);
+      if (error?.logs) {
+        console.error("Transaction logs:", error.logs);
+      }
+    },
+  });
+}

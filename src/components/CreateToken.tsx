@@ -1,33 +1,18 @@
 "use client";
 
 import { useState } from 'react';
-import { useConnection, useWallet } from '@solana/wallet-adapter-react';
-import { useQueryClient } from '@tanstack/react-query';
-import { 
-    Keypair, 
-    SystemProgram, 
-    Transaction,
-} from '@solana/web3.js';
-import { 
-    MINT_SIZE, 
-    TOKEN_PROGRAM_ID, 
-    createInitializeMintInstruction, 
-    createAssociatedTokenAccountInstruction, 
-    getAssociatedTokenAddress, 
-    createMintToInstruction 
-} from '@solana/spl-token';
-import { Loader2, Coins, Copy, Check } from 'lucide-react';
-import { saveTokenName } from './dex/dex-data-access';
+import { useWallet } from '@solana/wallet-adapter-react';
+import { Loader2, Coins, Copy, Check, Sparkles, ImageIcon } from 'lucide-react';
+import { useCreateToken, getMintPda } from './dex/dex-data-access';
 
 export const CreateToken = () => {
-    const { connection } = useConnection();
-    const { publicKey, sendTransaction } = useWallet();
-    const queryClient = useQueryClient();
+    const { publicKey } = useWallet();
+    const createToken = useCreateToken();
 
     const [tokenName, setTokenName] = useState("");
-    const [amount, setAmount] = useState("");
+    const [tokenSymbol, setTokenSymbol] = useState("");
+    const [tokenUri, setTokenUri] = useState("");
     const [mintAddress, setMintAddress] = useState("");
-    const [isLoading, setIsLoading] = useState(false);
     const [copied, setCopied] = useState(false);
 
     const handleCopy = async () => {
@@ -41,149 +26,176 @@ export const CreateToken = () => {
             alert("请先连接钱包！");
             return;
         }
-        
-        if (!amount || Number(amount) <= 0) {
-            alert("请输入有效的数量！");
+
+        if (!tokenName.trim()) {
+            alert("请输入代币名称！");
             return;
         }
 
-        setIsLoading(true);
+        if (!tokenSymbol.trim()) {
+            alert("请输入代币符号！");
+            return;
+        }
+
         try {
-            const mintKeypair = Keypair.generate();
-            const mintPublicKey = mintKeypair.publicKey;
-
-            const lamports = await connection.getMinimumBalanceForRentExemption(MINT_SIZE);
-
-            const userATA = await getAssociatedTokenAddress(mintPublicKey, publicKey);
-
-            const transaction = new Transaction().add(
-                SystemProgram.createAccount({
-                    fromPubkey: publicKey,
-                    newAccountPubkey: mintPublicKey,
-                    space: MINT_SIZE,
-                    lamports,
-                    programId: TOKEN_PROGRAM_ID,
-                }),
-                createInitializeMintInstruction(
-                    mintPublicKey,
-                    6, // decimals
-                    publicKey, // mint authority
-                    publicKey, // freeze authority
-                ),
-                createAssociatedTokenAccountInstruction(
-                    publicKey, // payer
-                    userATA, // ata
-                    publicKey, // owner
-                    mintPublicKey, // mint
-                ),
-                createMintToInstruction(
-                    mintPublicKey, // mint
-                    userATA, // destination
-                    publicKey, // authority
-                    BigInt(Number(amount) * 10 ** 6), // amount with 6 decimals
-                ),
-            );
-
-            const signature = await sendTransaction(transaction, connection, { 
-                signers: [mintKeypair] 
+            const result = await createToken.mutateAsync({
+                name: tokenName.trim(),
+                symbol: tokenSymbol.trim(),
+                uri: tokenUri.trim() || "",
             });
-            await connection.confirmTransaction(signature, 'confirmed');
-            
-            console.log("✅ Token created successfully");
-            const mintAddressStr = mintPublicKey.toBase58();
-            setMintAddress(mintAddressStr);
-            
-            // 保存代币名称到本地存储
-            if (tokenName.trim()) {
-                saveTokenName(mintAddressStr, tokenName.trim());
-            }
-            
+
+            setMintAddress(result.mintAddress);
             setTokenName("");
-            setAmount("");
-            
-            // 刷新代币列表
-            queryClient.invalidateQueries({ queryKey: ["userTokens"] });
+            setTokenSymbol("");
+            setTokenUri("");
         } catch (error) {
             console.error("❌ Token creation failed", error);
             alert(`Token creation failed: ${error}`);
-        } finally {
-            setIsLoading(false);
         }
     };
 
-    return (
-        <div className="space-y-4">
-                <div>
-                    <label className="text-xs text-stone-500 mb-2 block font-bold uppercase tracking-wider">
-                        Token Name (Optional)
-                    </label>
-                    <input
-                        type="text"
-                        placeholder="e.g., Mock USDC"
-                        className="w-full bg-stone-50 border border-stone-200 rounded-lg px-4 py-3 text-stone-700 text-sm outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100 transition-all"
-                        value={tokenName}
-                        onChange={(e) => setTokenName(e.target.value)}
-                    />
-                </div>
-                
-                <div>
-                    <label className="text-xs text-stone-500 mb-2 block font-bold uppercase tracking-wider">
-                        Amount to Mint
-                    </label>
-                    <input
-                        type="number"
-                        placeholder="e.g., 1000"
-                        className="w-full bg-stone-50 border border-stone-200 rounded-lg px-4 py-3 text-stone-700 text-sm outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100 transition-all"
-                        value={amount}
-                        onChange={(e) => setAmount(e.target.value)}
-                    />
-                </div>
-                
-                <button
-                    onClick={handleCreateToken}
-                    disabled={isLoading || !publicKey || !amount}
-                    className="w-full py-3 rounded-xl font-bold uppercase tracking-wider text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed bg-amber-500 hover:bg-amber-600 shadow-md flex items-center justify-center gap-2"
-                >
-                    {isLoading ? (
-                        <>
-                            <Loader2 className="w-5 h-5 animate-spin" />
-                            Minting...
-                        </>
-                    ) : (
-                        <>
-                            <Coins className="w-5 h-5" />
-                            Create Token
-                        </>
-                    )}
-                </button>
+    // 预测 Mint 地址
+    const predictedMint = publicKey ? getMintPda(publicKey).toString() : "";
 
-                {mintAddress && (
-                    <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-lg">
-                        <p className="text-green-700 text-sm font-medium mb-2 flex items-center gap-1">
-                            <Check className="w-4 h-4" />
-                            Token Created Successfully!
-                        </p>
-                        <div className="flex items-center gap-2">
-                            <code className="flex-1 text-xs bg-white p-2 rounded border border-green-200 text-stone-700 font-mono break-all">
-                                {mintAddress}
-                            </code>
-                            <button
-                                onClick={handleCopy}
-                                className="p-2 rounded-lg bg-white border border-green-200 hover:bg-green-100 transition-colors"
-                                title="Copy address"
-                            >
-                                {copied ? (
-                                    <Check className="w-4 h-4 text-green-600" />
-                                ) : (
-                                    <Copy className="w-4 h-4 text-stone-500" />
-                                )}
-                            </button>
-                        </div>
-                        <p className="text-xs text-green-600 mt-2">
-                            Copy this address to use in the DEX pool
-                        </p>
-                    </div>
+    return (
+        <div className="space-y-5">
+            {/* Header */}
+            <div className="text-center mb-6">
+                <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-gradient-to-br from-amber-400 to-orange-500 mb-3">
+                    <Sparkles className="w-6 h-6 text-white" />
+                </div>
+                <h3 className="text-lg font-bold text-stone-800">Create Meme Token</h3>
+                <p className="text-sm text-stone-500 mt-1">
+                    Launch your token with on-chain metadata
+                </p>
+            </div>
+
+            {/* Token Name */}
+            <div>
+                <label className="text-xs text-stone-500 mb-2 block font-bold uppercase tracking-wider">
+                    Token Name *
+                </label>
+                <input
+                    type="text"
+                    placeholder="e.g., Doge Moon Coin"
+                    className="w-full bg-stone-50 border border-stone-200 rounded-lg px-4 py-3 text-stone-700 text-sm outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100 transition-all"
+                    value={tokenName}
+                    onChange={(e) => setTokenName(e.target.value)}
+                    maxLength={32}
+                />
+                <p className="text-xs text-stone-400 mt-1">{tokenName.length}/32 characters</p>
+            </div>
+
+            {/* Token Symbol */}
+            <div>
+                <label className="text-xs text-stone-500 mb-2 block font-bold uppercase tracking-wider">
+                    Token Symbol *
+                </label>
+                <input
+                    type="text"
+                    placeholder="e.g., DOGE"
+                    className="w-full bg-stone-50 border border-stone-200 rounded-lg px-4 py-3 text-stone-700 text-sm outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100 transition-all uppercase"
+                    value={tokenSymbol}
+                    onChange={(e) => setTokenSymbol(e.target.value.toUpperCase())}
+                    maxLength={10}
+                />
+                <p className="text-xs text-stone-400 mt-1">{tokenSymbol.length}/10 characters</p>
+            </div>
+
+            {/* Token URI (Optional) */}
+            <div>
+                <label className="text-xs text-stone-500 mb-2 block font-bold uppercase tracking-wider flex items-center gap-2">
+                    <ImageIcon className="w-3 h-3" />
+                    Metadata URI (Optional)
+                </label>
+                <input
+                    type="url"
+                    placeholder="https://example.com/metadata.json"
+                    className="w-full bg-stone-50 border border-stone-200 rounded-lg px-4 py-3 text-stone-700 text-sm outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100 transition-all"
+                    value={tokenUri}
+                    onChange={(e) => setTokenUri(e.target.value)}
+                />
+                <p className="text-xs text-stone-400 mt-1">
+                    JSON with name, symbol, description & image
+                </p>
+            </div>
+
+            {/* Predicted Address Preview */}
+            {publicKey && (
+                <div className="p-3 bg-stone-100 rounded-lg border border-stone-200">
+                    <p className="text-xs text-stone-500 font-bold uppercase tracking-wider mb-1">
+                        Predicted Mint Address
+                    </p>
+                    <code className="text-xs text-stone-600 font-mono break-all">
+                        {predictedMint.slice(0, 20)}...{predictedMint.slice(-20)}
+                    </code>
+                </div>
+            )}
+
+            {/* Create Button */}
+            <button
+                onClick={handleCreateToken}
+                disabled={createToken.isPending || !publicKey || !tokenName.trim() || !tokenSymbol.trim()}
+                className="w-full py-4 rounded-xl font-bold uppercase tracking-wider text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 shadow-lg hover:shadow-xl flex items-center justify-center gap-2"
+            >
+                {createToken.isPending ? (
+                    <>
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                        Creating Token...
+                    </>
+                ) : (
+                    <>
+                        <Coins className="w-5 h-5" />
+                        Create Meme Token
+                    </>
                 )}
+            </button>
+
+            {/* Info Box */}
+            <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
+                <p className="text-amber-700 text-xs">
+                    <strong>💡 What happens:</strong><br />
+                    • 1 Billion tokens will be minted<br />
+                    • Tokens go into a Bonding Curve vault<br />
+                    • Users can buy/sell through the curve
+                </p>
+            </div>
+
+            {/* Success Message */}
+            {mintAddress && (
+                <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-lg animate-fade-in">
+                    <p className="text-green-700 text-sm font-medium mb-2 flex items-center gap-1">
+                        <Check className="w-4 h-4" />
+                        Token Created Successfully!
+                    </p>
+                    <div className="flex items-center gap-2">
+                        <code className="flex-1 text-xs bg-white p-2 rounded border border-green-200 text-stone-700 font-mono break-all">
+                            {mintAddress}
+                        </code>
+                        <button
+                            onClick={handleCopy}
+                            className="p-2 rounded-lg bg-white border border-green-200 hover:bg-green-100 transition-colors"
+                            title="Copy address"
+                        >
+                            {copied ? (
+                                <Check className="w-4 h-4 text-green-600" />
+                            ) : (
+                                <Copy className="w-4 h-4 text-stone-500" />
+                            )}
+                        </button>
+                    </div>
+                    <div className="mt-3 flex gap-2">
+                        <a
+                            href={`https://explorer.solana.com/address/${mintAddress}?cluster=devnet`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs text-green-600 hover:text-green-700 underline"
+                        >
+                            View on Explorer ↗
+                        </a>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
