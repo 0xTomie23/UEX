@@ -1,9 +1,9 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{Mint, TokenInterface};
 
-use crate::constants::{ANCHOR_DISCRIMINATOR, POOL_SEED, LP_TOKEN_SEED};
-use crate::state::LiquidityPool;
+use crate::constants::{ANCHOR_DISCRIMINATOR, LP_TOKEN_SEED, POOL_SEED};
 use crate::error::ErrorCode;
+use crate::state::LiquidityPool;
 
 #[derive(Accounts)]
 pub struct InitializePool<'info> {
